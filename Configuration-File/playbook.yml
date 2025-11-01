@@ -1,0 +1,112 @@
+---
+- name: Install dependencies and deploy Docker container
+  hosts: all
+  become: yes
+  vars:
+    docker_image: "nginx:latest"   
+    container_name: "my-app"
+        
+  tasks:
+    - name: Update apt package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required system packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - software-properties-common
+        state: present
+
+    - name: Install Apache2
+      apt:
+        name: apache2
+        state: present
+      notify:
+        - Enable and start Apache2
+
+    - name: Install MySQL Server
+      apt:
+        name: mysql-server
+        state: present
+      notify:
+        - Enable and start MySQL
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+        update_cache: yes
+
+    - name: Install Docker Python module
+      pip:
+        name: docker
+
+    - name: Enable and start Docker service
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+
+    - name: Pull Docker image
+      docker_image:
+        name: "{{ docker_image }}"
+        source: pull
+
+    - name: Start Docker container 
+      docker_container:
+        name: "{{ container_name }}"
+        image: "{{ docker_image }}"
+        state: started
+        restart_policy: unless-stopped
+        ports:
+          - "8080:80"   
+
+    - name: Verify Apache2 is running
+      uri:
+        url: "http://localhost:80"
+        status_code: 200
+      register: apache_result
+      until: apache_result.status == 200
+      retries: 5
+      delay: 5
+
+    - name: Verify Docker container is running
+      shell: docker ps --filter "name={{ container_name }}" --format "table {{.Names}}\t{{.Status}}"
+      register: docker_ps_result
+      
+    - name: Display container status
+      debug:
+        msg: "{{ docker_ps_result.stdout }}"
+
+  handlers:
+    - name: Enable and start Apache2
+      systemd:
+        name: apache2
+        enabled: yes
+        state: started
+
+    - name: Enable and start MySQL
+      systemd:
+        name: mysql
+        enabled: yes
+        state: started
